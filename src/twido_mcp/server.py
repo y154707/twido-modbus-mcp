@@ -2,6 +2,8 @@ import json
 import time
 from mcp.server.fastmcp import FastMCP
 from pymodbus.client import ModbusTcpClient, ModbusSerialClient
+import serial.tools.list_ports
+
 
 mcp = FastMCP("Twido-Modbus-MCP")
 
@@ -10,6 +12,16 @@ def get_modbus_client(connection_type: str, host_or_port: str, baudrate: int = 1
     if connection_type.lower() == "serial":
         return ModbusSerialClient(port=host_or_port, baudrate=baudrate, parity='N', stopbits=1, bytesize=8)
     return ModbusTcpClient(host=host_or_port, port=502)
+
+@mcp.tool()
+def list_available_serial_ports() -> str:
+    """Lists all active COM/serial ports on the host system to locate the PLC adapter."""
+    ports = serial.tools.list_ports.comports()
+    if not ports:
+        return "No active serial/USB ports found on the host system."
+
+    result = [{"port": p.device, "description": p.description} for p in ports]
+    return json.dumps(result)
 
 @mcp.tool()
 def read_plc_state(connection_type: str, endpoint: str, start_address: int = 0, count: int = 10) -> str:
