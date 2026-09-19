@@ -301,9 +301,10 @@ INSPECT_PLC_TOOL = types.Tool(
 READ_MEMORY_TOOL = types.Tool(
     name="read_plc_memory",
     description=(
-        "Reads Modbus memory areas intentionally exposed by a Twido application. "
-        "area='M' uses FC01 and corresponds to %M bits. area='MW' uses FC03 and "
-        "corresponds to %MW words. This is runtime memory, not the TwidoSuite program."
+        "Reads Twido runtime memory. area='auto' tries %MW first, then %M, and "
+        "returns an explicit empty/no-Modbus-memory result if neither area is accessible. "
+        "area='M' uses FC01 and area='MW' uses FC03. This is runtime memory, "
+        "not the TwidoSuite program."
     ),
     input_schema={
         "type": "object",
@@ -311,7 +312,7 @@ READ_MEMORY_TOOL = types.Tool(
             "connection_type": {"type": "string", "enum": ["tcp", "serial"]},
             "endpoint": {"type": "string"},
             "slave_id": {"type": "integer", "minimum": 0, "maximum": 247, "default": 1},
-            "area": {"type": "string", "enum": ["M", "MW"]},
+            "area": {"type": "string", "enum": ["auto", "M", "MW"], "default": "auto"},
             "start_address": {"type": "integer", "minimum": 0, "default": 0},
             "count": {"type": "integer", "minimum": 1, "default": 10},
             "baudrate": {"type": "integer", "minimum": 1, "default": DEFAULT_BAUDRATE},
@@ -319,7 +320,7 @@ READ_MEMORY_TOOL = types.Tool(
             "stopbits": {"type": "integer", "enum": [1, 2], "default": DEFAULT_STOPBITS},
             "bytesize": {"type": "integer", "enum": [7, 8], "default": DEFAULT_BYTESIZE},
         },
-        "required": ["connection_type", "endpoint", "area"],
+        "required": ["connection_type", "endpoint"],
         "additionalProperties": False,
     },
 )
@@ -645,7 +646,7 @@ async def tool_read_plc_memory(args: dict[str, Any]) -> types.CallToolResult:
         connection_type, endpoint = require_connection_arguments(args)
         serial_params = get_serial_parameters(args)
         slave_id = get_slave_id(args)
-        area = str(args["area"]).upper()
+        area = str(args.get("area", "auto")).upper()
         start_address = int(args.get("start_address", 0))
         count = int(args.get("count", 10))
 
@@ -653,40 +654,111 @@ async def tool_read_plc_memory(args: dict[str, Any]) -> types.CallToolResult:
             raise ValueError("start_address must be >= 0")
         if count < 1:
             raise ValueError("count must be >= 1")
-        if area == "M" and count > MAX_READ_BITS:
+        if area not in {"AUTO", "M", "MW"}:
+            raise ValueError("area must be one of: auto, M, MW")
+        if area in {"AUTO", "M"} and count > MAX_READ_BITS:
             raise ValueError(f"count cannot exceed {MAX_READ_BITS} for area M")
-        if area == "MW" and count > MAX_READ_REGISTERS:
+        if area in {"AUTO", "MW"} and count > MAX_READ_REGISTERS:
             raise ValueError(f"count cannot exceed {MAX_READ_REGISTERS} for area MW")
 
         client = get_modbus_client(connection_type, endpoint, **serial_params)
         connect_or_raise(client, connection_type, endpoint)
 
-        if area == "M":
+        def read_m():
             result = client.read_coils(
                 address=start_address,
                 count=count,
                 device_id=slave_id,
             )
             check_modbus_result(result, "read %M coils")
-            values = normalize_bool_list(list(result.bits)[:count])
-        else:
+            return normalize_bool_list(list(result.bits)[:count])
+
+        def read_mw():
             result = client.read_holding_registers(
                 address=start_address,
                 count=count,
                 device_id=slave_id,
             )
             check_modbus_result(result, "read %MW holding registers")
-            values = list(result.registers)
+            return list(result.registers)
 
-        return success_result({
-            "status": "success",
-            "area": area,
-            "start_address": start_address,
-            "count": len(values),
-            "values": values,
-            "slave_id": slave_id,
-            "endpoint": endpoint,
-        })
+        # Explicit area: read only what the caller requested.
+        if area == "M":
+            values = read_m()
+            return success_result({
+                "status": "success",
+                "area": "M",
+                "start_address": start_address,
+                "count": len(values),
+                "values": values,
+                "slave_id": slave_id,
+                "endpoint": endpoint,
+            })
+
+        if area == "MW":
+            values = read_mw()
+            return success_result({
+                "status": "success",
+                "area": "MW",
+                "start_address": start_address,
+                "count": len(values),
+                "values": values,
+                "slave_id": slave_id,
+                "endpoint": endpoint,
+            })
+
+        # Auto discovery: %MW first, then %M. Modbus exception 02 is treated
+        # as a discovery miss, not as a communication failure.
+        mw_error = None
+        try:
+            values = read_mw()
+            return success_result({
+                "status": "success",
+                "discovery": "auto",
+                "selected_area": "MW",
+                "start_address": start_address,
+                "count": len(values),
+                "values": values,
+                "slave_id": slave_id,
+                "endpoint": endpoint,
+            })
+        except Exception as exc:
+            mw_error = str(exc)
+
+        try:
+            values = read_m()
+            return success_result({
+                "status": "success",
+                "discovery": "auto",
+                "selected_area": "M",
+                "start_address": start_address,
+                "count": len(values),
+                "values": values,
+                "slave_id": slave_id,
+                "endpoint": endpoint,
+                "fallback_from": "MW",
+                "fallback_reason": mw_error,
+            })
+        except Exception as m_error:
+            return success_result({
+                "status": "no_modbus_memory_detected",
+                "discovery": "auto",
+                "selected_area": None,
+                "start_address": start_address,
+                "count_requested": count,
+                "slave_id": slave_id,
+                "endpoint": endpoint,
+                "areas_tested": {
+                    "MW": {"available": False, "error": mw_error},
+                    "M": {"available": False, "error": str(m_error)},
+                },
+                "message": (
+                    "The PLC responded to Modbus communication, but neither %MW nor %M "
+                    "was accessible at the requested address. The PLC may be empty/reset, "
+                    "or its application may not allocate Modbus-accessible memory. This "
+                    "result does not prove that the PLC contains no program or physical I/O."
+                ),
+            })
 
     except Exception as exc:
         return error_result("PLC memory read failed.", error=exc)
