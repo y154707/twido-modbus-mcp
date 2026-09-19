@@ -39,8 +39,8 @@ logger = logging.getLogger("twido-modbus-mcp")
 SERVER_NAME = "twido-modbus-mcp"
 SERVER_VERSION = "1.0.0"
 
-DEFAULT_BAUDRATE = 19200
-DEFAULT_PARITY = "N"
+DEFAULT_BAUDRATE = 9600
+DEFAULT_PARITY = "E"
 DEFAULT_STOPBITS = 1
 DEFAULT_BYTESIZE = 8
 
