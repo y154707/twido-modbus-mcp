@@ -39,8 +39,8 @@ logger = logging.getLogger("twido-modbus-mcp")
 SERVER_NAME = "twido-modbus-mcp"
 SERVER_VERSION = "1.0.0"
 
-DEFAULT_BAUDRATE = 9600
-DEFAULT_PARITY = "E"
+DEFAULT_BAUDRATE = 19200
+DEFAULT_PARITY = "N"
 DEFAULT_STOPBITS = 1
 DEFAULT_BYTESIZE = 8
 
@@ -704,6 +704,16 @@ async def tool_read_plc_state(
             count,
         )
 
+        logger.info(
+            "Serial configuration: port=%s baudrate=%d parity=%s "
+            "stopbits=%d bytesize=%d slave_id=%d",
+            endpoint,
+            serial_params["baudrate"],
+            serial_params["parity"],
+            serial_params["stopbits"],
+            serial_params["bytesize"],
+            slave_id,
+        )
         client = get_modbus_client(
             connection_type=connection_type,
             endpoint=endpoint,
