@@ -14,10 +14,17 @@ def get_modbus_client(connection_type: str, endpoint: str, baudrate: int = 19200
         return ModbusSerialClient(port=endpoint, baudrate=baudrate, parity='N', stopbits=1, bytesize=8)
     return ModbusTcpClient(host=endpoint, port=502)
 
-# Helper to normalize tool arguments
+# Helper to normalize tool arguments across SDK versions
 def parse_args(arguments) -> dict:
     if arguments is None:
         return {}
+    
+    # If passed a CallToolRequestParams instance, extract its inner .arguments attribute
+    if hasattr(arguments, "arguments"):
+        arguments = arguments.arguments
+        if arguments is None:
+            return {}
+
     if isinstance(arguments, dict):
         return arguments
     if hasattr(arguments, "model_dump"):
@@ -81,9 +88,8 @@ async def handle_list_tools() -> list[types.Tool]:
 # 2. Define call_tool Handler
 async def handle_call_tool(name: str, arguments: dict | None = None) -> types.CallToolResult:
     """Execute tools called by the client."""
-    args = parse_args(arguments)
-
-    # Parameterless tool execution
+    
+    # Handle parameterless tool immediately
     if name == "list_available_serial_ports":
         ports = serial.tools.list_ports.comports()
         if not ports:
@@ -91,7 +97,8 @@ async def handle_call_tool(name: str, arguments: dict | None = None) -> types.Ca
         res = [{"port": p.device, "description": p.description} for p in ports]
         return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(res, indent=2))])
 
-    # Validate parameters for hardware interaction tools
+    # Safely extract dictionary arguments for hardware tools
+    args = parse_args(arguments)
     connection_type = args.get("connection_type")
     endpoint = args.get("endpoint")
 
