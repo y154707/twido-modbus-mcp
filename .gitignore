@@ -1,3 +1,6 @@
+#Custom and backup files:
+_bkp_README.md
+_bkp_server.py
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

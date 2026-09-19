@@ -1,0 +1,14 @@
+{
+  "servers": {
+    "twido-modbus-mcp": {
+      "command": "python",
+      "args": [
+        "-m",
+        "twido_mcp.server"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      }
+    }
+  }
+}

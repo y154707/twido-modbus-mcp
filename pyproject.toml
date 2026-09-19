@@ -1,0 +1,25 @@
+[project]
+name = "twido-modbus-mcp"
+version = "0.1.0"
+description = "MCP server for Schneider Electric TWIDO Modbus devices"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Nicolás" }]
+license = { text = "MIT" }
+dependencies = [
+  "mcp>=1.6.0,<2.0.0",
+  "pymodbus>=3.7.0",
+]
+
+[project.scripts]
+twido-mcp = "twido_mcp.server:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
