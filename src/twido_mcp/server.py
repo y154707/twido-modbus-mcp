@@ -8,7 +8,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 import mcp.types as types
 
-# Initialize Server
+# Initialize Server instance
 app = Server("twido-modbus-mcp")
 
 # Modbus Connection Helper
@@ -18,7 +18,7 @@ def get_modbus_client(connection_type: str, endpoint: str, baudrate: int = 19200
     return ModbusTcpClient(host=endpoint, port=502)
 
 @app.list_tools()
-async def list_tools() -> list[types.Tool]:
+async def handle_list_tools() -> list[types.Tool]:
     """Expose available MCP tools to the client."""
     return [
         types.Tool(
@@ -28,7 +28,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="read_plc_state",
-            description="Reads registers (%MW) directly from the Twido PLC.",
+            description="Reads holding registers (%MW) directly from the Twido PLC.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -70,7 +70,7 @@ async def list_tools() -> list[types.Tool]:
     ]
 
 @app.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     """Execute tools called by the client."""
     if name == "list_available_serial_ports":
         ports = serial.tools.list_ports.comports()
@@ -140,7 +140,11 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
 async def main():
     async with stdio_server() as (read_stream, write_stream):
-        await app.run(read_stream, write_stream, app.create_initialization_options())
+        await app.run(
+            read_stream,
+            write_stream,
+            app.create_initialization_options()
+        )
 
 if __name__ == "__main__":
     asyncio.run(main())
