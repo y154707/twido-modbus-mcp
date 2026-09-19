@@ -1,14 +1,12 @@
 {
-  "servers": {
-    "twido-modbus-mcp": {
-      "command": "python",
+  "mcpServers": {
+    "twido-mcp": {
+      "command": "uvx",
       "args": [
-        "-m",
-        "twido_mcp.server"
-      ],
-      "env": {
-        "PYTHONPATH": "${workspaceFolder}/src"
-      }
+        "--from",
+        "git+https://github.com/y154707/twido-modbus-mcp.git@feat/initial_development",
+        "twido-mcp"
+      ]
     }
   }
 }
