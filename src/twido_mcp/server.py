@@ -8,16 +8,13 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 import mcp.types as types
 
-# Initialize Server instance
-app = Server("twido-modbus-mcp")
-
 # Modbus Connection Helper
 def get_modbus_client(connection_type: str, endpoint: str, baudrate: int = 19200):
     if connection_type.lower() == "serial":
         return ModbusSerialClient(port=endpoint, baudrate=baudrate, parity='N', stopbits=1, bytesize=8)
     return ModbusTcpClient(host=endpoint, port=502)
 
-@app.list_tools()
+# 1. Define list_tools Handler
 async def handle_list_tools() -> list[types.Tool]:
     """Expose available MCP tools to the client."""
     return [
@@ -69,7 +66,7 @@ async def handle_list_tools() -> list[types.Tool]:
         )
     ]
 
-@app.call_tool()
+# 2. Define call_tool Handler
 async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     """Execute tools called by the client."""
     if name == "list_available_serial_ports":
@@ -137,6 +134,13 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
             client.close()
 
     raise ValueError(f"Unknown tool: {name}")
+
+# 3. Instantiate Server passing callbacks explicitly
+app = Server(
+    "twido-modbus-mcp",
+    on_list_tools=handle_list_tools,
+    on_call_tool=handle_call_tool
+)
 
 async def main():
     async with stdio_server() as (read_stream, write_stream):
