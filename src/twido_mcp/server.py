@@ -135,14 +135,15 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
 
     raise ValueError(f"Unknown tool: {name}")
 
-# 3. Instantiate Server passing callbacks explicitly
+# 3. Instantiate Server
 app = Server(
     "twido-modbus-mcp",
     on_list_tools=handle_list_tools,
     on_call_tool=handle_call_tool
 )
 
-async def main():
+# 4. Async Execution Wrapper
+async def run_server():
     async with stdio_server() as (read_stream, write_stream):
         await app.run(
             read_stream,
@@ -150,5 +151,9 @@ async def main():
             app.create_initialization_options()
         )
 
+# 5. Synchronous entry point called by script CLI
+def main():
+    asyncio.run(run_server())
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
