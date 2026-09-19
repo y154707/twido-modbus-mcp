@@ -380,6 +380,15 @@ READ_PLC_STATE_TOOL = types.Tool(
                     "for example 192.168.1.10 or COM5."
                 ),
             },
+            "slave_id": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 247,
+                "default": 1,
+                "description": (
+                    "Modbus RTU slave/unit ID of the Twido PLC."
+                ),
+            },
             "start_address": {
                 "type": "integer",
                 "minimum": 0,
@@ -664,6 +673,13 @@ async def tool_read_plc_state(
             )
         )
 
+        slave_id = int(
+            args.get(
+                "slave_id",
+                1,
+            )
+        )
+
         if start_address < 0:
             raise ValueError(
                 "start_address must be >= 0"
@@ -718,7 +734,9 @@ async def tool_read_plc_state(
         result = client.read_holding_registers(
             address=start_address,
             count=count,
+            slave=slave_id,
         )
+
 
         check_modbus_result(
             result,
