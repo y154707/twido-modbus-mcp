@@ -1,96 +1,146 @@
 import json
 import time
-from mcp.server.fastmcp import FastMCP
-from pymodbus.client import ModbusTcpClient, ModbusSerialClient
+import asyncio
 import serial.tools.list_ports
+from pymodbus.client import ModbusTcpClient, ModbusSerialClient
 
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+import mcp.types as types
 
-mcp = FastMCP("Twido-Modbus-MCP")
+# Initialize Server
+app = Server("twido-modbus-mcp")
 
 # Modbus Connection Helper
-def get_modbus_client(connection_type: str, host_or_port: str, baudrate: int = 19200):
+def get_modbus_client(connection_type: str, endpoint: str, baudrate: int = 19200):
     if connection_type.lower() == "serial":
-        return ModbusSerialClient(port=host_or_port, baudrate=baudrate, parity='N', stopbits=1, bytesize=8)
-    return ModbusTcpClient(host=host_or_port, port=502)
+        return ModbusSerialClient(port=endpoint, baudrate=baudrate, parity='N', stopbits=1, bytesize=8)
+    return ModbusTcpClient(host=endpoint, port=502)
 
-@mcp.tool()
-def list_available_serial_ports() -> str:
-    """Lists all active COM/serial ports on the host system to locate the PLC adapter."""
-    ports = serial.tools.list_ports.comports()
-    if not ports:
-        return "No active serial/USB ports found on the host system."
+@app.list_tools()
+async def list_tools() -> list[types.Tool]:
+    """Expose available MCP tools to the client."""
+    return [
+        types.Tool(
+            name="list_available_serial_ports",
+            description="Lists all active COM/serial ports on the host system to locate the PLC adapter.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        types.Tool(
+            name="read_plc_state",
+            description="Reads registers (%MW) directly from the Twido PLC.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "connection_type": {"type": "string", "description": "'tcp' or 'serial'"},
+                    "endpoint": {"type": "string", "description": "IP address (e.g. '192.168.1.10') or Serial Port (e.g. 'COM3')"},
+                    "start_address": {"type": "integer", "default": 0},
+                    "count": {"type": "integer", "default": 10}
+                },
+                "required": ["connection_type", "endpoint"]
+            }
+        ),
+        types.Tool(
+            name="create_plc_backup",
+            description="Reads memory blocks (%MW0-%MW100) and saves a timestamped JSON snapshot.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "connection_type": {"type": "string"},
+                    "endpoint": {"type": "string"},
+                    "filepath": {"type": "string", "default": "twido_backup.json"}
+                },
+                "required": ["connection_type", "endpoint"]
+            }
+        ),
+        types.Tool(
+            name="test_single_output_series",
+            description="Toggles a single PLC output (%Q0.X) sequentially for I/O mapping. Requires human confirmation.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "connection_type": {"type": "string"},
+                    "endpoint": {"type": "string"},
+                    "output_index": {"type": "integer"},
+                    "human_confirmed": {"type": "boolean"}
+                },
+                "required": ["connection_type", "endpoint", "output_index", "human_confirmed"]
+            }
+        )
+    ]
 
-    result = [{"port": p.device, "description": p.description} for p in ports]
-    return json.dumps(result)
+@app.call_tool()
+async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+    """Execute tools called by the client."""
+    if name == "list_available_serial_ports":
+        ports = serial.tools.list_ports.comports()
+        if not ports:
+            return [types.TextContent(type="text", text="No active serial/USB ports found on host.")]
+        res = [{"port": p.device, "description": p.description} for p in ports]
+        return [types.TextContent(type="text", text=json.dumps(res, indent=2))]
 
-@mcp.tool()
-def read_plc_state(connection_type: str, endpoint: str, start_address: int = 0, count: int = 10) -> str:
-    """Reads registers (%MW) or coils (%Q/%I) directly from the Twido PLC.
-    connection_type: 'tcp' or 'serial'
-    endpoint: IP address (e.g. '192.168.1.10') or Serial Port (e.g. 'COM3' or '/dev/ttyUSB0')
-    """
-    client = get_modbus_client(connection_type, endpoint)
-    if not client.connect():
-        return json.dumps({"status": "error", "message": "Failed to connect to PLC"})
+    connection_type = arguments.get("connection_type")
+    endpoint = arguments.get("endpoint")
 
-    res = client.read_holding_registers(start_address, count)
-    client.close()
-
-    if res.isError():
-        return json.dumps({"status": "error", "message": "Modbus read operation failed"})
-    return json.dumps({"status": "success", "start_address": start_address, "values": res.registers})
-
-@mcp.tool()
-def create_plc_backup(connection_type: str, endpoint: str, filepath: str = "twido_backup.json") -> str:
-    """Reads memory blocks (%MW0-%MW100) and saves a timestamped JSON snapshot."""
-    client = get_modbus_client(connection_type, endpoint)
-    if not client.connect():
-        return "Failed to establish PLC connection."
-
-    res = client.read_holding_registers(0, 100)
-    client.close()
-
-    if res.isError():
-        return "Backup failed during memory read."
-
-    backup_data = {
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "holding_registers": res.registers
-    }
-    with open(filepath, "w") as f:
-        json.dump(backup_data, f, indent=2)
-
-    return f"Backup successfully stored in {filepath}"
-
-@mcp.tool()
-def test_single_output_series(connection_type: str, endpoint: str, output_index: int, human_confirmed: bool) -> str:
-    """Toggles a single PLC output (%Q0.X) sequentially for I/O mapping.
-    SAFETY: Sets all outputs to LOW first, then pulses ONLY the specified output.
-    Requires human_confirmed=True.
-    """
-    if not human_confirmed:
-        return "Aborted: Human operator must confirm physical safety before toggling hardware."
-
-    client = get_modbus_client(connection_type, endpoint)
-    if not client.connect():
-        return "Connection failed."
-
-    try:
-        # Step 1: Force reset all digital outputs (%Q) to safe LOW state
-        for i in range(16):
-            client.write_coil(i, False)
-
-        # Step 2: Pulse the requested output for physical check
-        client.write_coil(output_index, True)
-        time.sleep(1.5)  # Output active window for physical indicator
-        client.write_coil(output_index, False)
-
-        return f"Output %Q0.{output_index} was pulsed HIGH for 1.5s and reset to LOW. Verify physical element."
-    finally:
+    if name == "read_plc_state":
+        start_address = arguments.get("start_address", 0)
+        count = arguments.get("count", 10)
+        client = get_modbus_client(connection_type, endpoint)
+        if not client.connect():
+            return [types.TextContent(type="text", text=json.dumps({"status": "error", "message": "Failed to connect to PLC"}))]
+        
+        res = client.read_holding_registers(start_address, count)
         client.close()
+        
+        if res.isError():
+            return [types.TextContent(type="text", text=json.dumps({"status": "error", "message": "Modbus read failed"}))]
+        return [types.TextContent(type="text", text=json.dumps({"status": "success", "values": res.registers}))]
 
-def main():
-    mcp.run()
+    elif name == "create_plc_backup":
+        filepath = arguments.get("filepath", "twido_backup.json")
+        client = get_modbus_client(connection_type, endpoint)
+        if not client.connect():
+            return [types.TextContent(type="text", text="Failed to connect to PLC.")]
+        
+        res = client.read_holding_registers(0, 100)
+        client.close()
+        if res.isError():
+            return [types.TextContent(type="text", text="Backup failed during memory read.")]
+
+        backup_data = {
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "holding_registers": res.registers
+        }
+        with open(filepath, "w") as f:
+            json.dump(backup_data, f, indent=2)
+        return [types.TextContent(type="text", text=f"Backup successfully written to {filepath}")]
+
+    elif name == "test_single_output_series":
+        output_index = arguments.get("output_index")
+        human_confirmed = arguments.get("human_confirmed", False)
+        
+        if not human_confirmed:
+            return [types.TextContent(type="text", text="Aborted: Human operator must confirm safety.")]
+
+        client = get_modbus_client(connection_type, endpoint)
+        if not client.connect():
+            return [types.TextContent(type="text", text="Connection failed.")]
+
+        try:
+            for i in range(16):
+                client.write_coil(i, False)
+            client.write_coil(output_index, True)
+            time.sleep(1.5)
+            client.write_coil(output_index, False)
+            return [types.TextContent(type="text", text=f"Pulsed output %Q0.{output_index} for 1.5s and reset to LOW.")]
+        finally:
+            client.close()
+
+    raise ValueError(f"Unknown tool: {name}")
+
+async def main():
+    async with stdio_server() as (read_stream, write_stream):
+        await app.run(read_stream, write_stream, app.create_initialization_options())
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
