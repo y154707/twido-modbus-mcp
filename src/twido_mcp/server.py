@@ -78,11 +78,12 @@ async def handle_list_tools() -> list[types.Tool]:
         )
     ]
 
-# 2. Define call_tool Handler returning CallToolResult
+# 2. Define call_tool Handler
 async def handle_call_tool(name: str, arguments: dict | None = None) -> types.CallToolResult:
     """Execute tools called by the client."""
     args = parse_args(arguments)
 
+    # Parameterless tool execution
     if name == "list_available_serial_ports":
         ports = serial.tools.list_ports.comports()
         if not ports:
@@ -90,6 +91,7 @@ async def handle_call_tool(name: str, arguments: dict | None = None) -> types.Ca
         res = [{"port": p.device, "description": p.description} for p in ports]
         return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(res, indent=2))])
 
+    # Validate parameters for hardware interaction tools
     connection_type = args.get("connection_type")
     endpoint = args.get("endpoint")
 
