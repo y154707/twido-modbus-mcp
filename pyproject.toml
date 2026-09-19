@@ -7,8 +7,9 @@ requires-python = ">=3.10"
 authors = [{ name = "Nicolás" }]
 license = { text = "MIT" }
 dependencies = [
-  "mcp>=1.6.0,<2.0.0",
-  "pymodbus>=3.7.0",
+    "mcp>=1.0.0",
+    "pymodbus>=3.6.0",
+    "pyserial>=3.5",
 ]
 
 [project.scripts]
