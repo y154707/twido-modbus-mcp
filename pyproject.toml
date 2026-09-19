@@ -23,3 +23,7 @@ where = ["src"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# --- Points Hatch to the proper package source files ---
+[tool.hatch.build.targets.wheel]
+packages = ["src/twido_mcp"]
