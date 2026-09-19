@@ -734,9 +734,8 @@ async def tool_read_plc_state(
         result = client.read_holding_registers(
             address=start_address,
             count=count,
-            slave=slave_id,
+            device_id=slave_id,
         )
-
 
         check_modbus_result(
             result,
@@ -1012,7 +1011,9 @@ async def tool_test_single_output(
             result = client.write_coil(
                 address=i,
                 value=False,
+                device_id=slave_id,
             )
+
 
             check_modbus_result(
                 result,
@@ -1026,7 +1027,9 @@ async def tool_test_single_output(
         result = client.write_coil(
             address=output_index,
             value=True,
+            device_id=slave_id,
         )
+
 
         check_modbus_result(
             result,
@@ -1050,7 +1053,8 @@ async def tool_test_single_output(
 
         result = client.write_coil(
             address=output_index,
-            value=False,
+            value=True,
+            device_id=slave_id,
         )
 
         check_modbus_result(
