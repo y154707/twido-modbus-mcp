@@ -14,6 +14,18 @@ def get_modbus_client(connection_type: str, endpoint: str, baudrate: int = 19200
         return ModbusSerialClient(port=endpoint, baudrate=baudrate, parity='N', stopbits=1, bytesize=8)
     return ModbusTcpClient(host=endpoint, port=502)
 
+# Helper to normalize tool arguments across SDK versions
+def parse_args(arguments) -> dict:
+    if arguments is None:
+        return {}
+    if isinstance(arguments, dict):
+        return arguments
+    if hasattr(arguments, "model_dump"):
+        return arguments.model_dump()
+    if hasattr(arguments, "__dict__"):
+        return arguments.__dict__
+    return {}
+
 # 1. Define list_tools Handler
 async def handle_list_tools() -> list[types.Tool]:
     """Expose available MCP tools to the client."""
@@ -67,8 +79,10 @@ async def handle_list_tools() -> list[types.Tool]:
     ]
 
 # 2. Define call_tool Handler
-async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+async def handle_call_tool(name: str, arguments: dict | None = None) -> list[types.TextContent]:
     """Execute tools called by the client."""
+    args = parse_args(arguments)
+
     if name == "list_available_serial_ports":
         ports = serial.tools.list_ports.comports()
         if not ports:
@@ -76,12 +90,18 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
         res = [{"port": p.device, "description": p.description} for p in ports]
         return [types.TextContent(type="text", text=json.dumps(res, indent=2))]
 
-    connection_type = arguments.get("connection_type")
-    endpoint = arguments.get("endpoint")
+    connection_type = args.get("connection_type")
+    endpoint = args.get("endpoint")
+
+    if not connection_type or not endpoint:
+        return [types.TextContent(type="text", text=json.dumps({
+            "status": "error", 
+            "message": "Missing required parameters: 'connection_type' and 'endpoint'."
+        }))]
 
     if name == "read_plc_state":
-        start_address = arguments.get("start_address", 0)
-        count = arguments.get("count", 10)
+        start_address = args.get("start_address", 0)
+        count = args.get("count", 10)
         client = get_modbus_client(connection_type, endpoint)
         if not client.connect():
             return [types.TextContent(type="text", text=json.dumps({"status": "error", "message": "Failed to connect to PLC"}))]
@@ -94,7 +114,7 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
         return [types.TextContent(type="text", text=json.dumps({"status": "success", "values": res.registers}))]
 
     elif name == "create_plc_backup":
-        filepath = arguments.get("filepath", "twido_backup.json")
+        filepath = args.get("filepath", "twido_backup.json")
         client = get_modbus_client(connection_type, endpoint)
         if not client.connect():
             return [types.TextContent(type="text", text="Failed to connect to PLC.")]
@@ -113,8 +133,8 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
         return [types.TextContent(type="text", text=f"Backup successfully written to {filepath}")]
 
     elif name == "test_single_output_series":
-        output_index = arguments.get("output_index")
-        human_confirmed = arguments.get("human_confirmed", False)
+        output_index = args.get("output_index")
+        human_confirmed = args.get("human_confirmed", False)
         
         if not human_confirmed:
             return [types.TextContent(type="text", text="Aborted: Human operator must confirm safety.")]
@@ -151,7 +171,7 @@ async def run_server():
             app.create_initialization_options()
         )
 
-# 5. Synchronous entry point called by script CLI
+# 5. Synchronous entry point
 def main():
     asyncio.run(run_server())
 
