@@ -14,7 +14,7 @@ def get_modbus_client(connection_type: str, endpoint: str, baudrate: int = 19200
         return ModbusSerialClient(port=endpoint, baudrate=baudrate, parity='N', stopbits=1, bytesize=8)
     return ModbusTcpClient(host=endpoint, port=502)
 
-# Helper to normalize tool arguments across SDK versions
+# Helper to normalize tool arguments
 def parse_args(arguments) -> dict:
     if arguments is None:
         return {}
@@ -78,51 +78,60 @@ async def handle_list_tools() -> list[types.Tool]:
         )
     ]
 
-# 2. Define call_tool Handler
-async def handle_call_tool(name: str, arguments: dict | None = None) -> list[types.TextContent]:
+# 2. Define call_tool Handler returning CallToolResult
+async def handle_call_tool(name: str, arguments: dict | None = None) -> types.CallToolResult:
     """Execute tools called by the client."""
     args = parse_args(arguments)
 
     if name == "list_available_serial_ports":
         ports = serial.tools.list_ports.comports()
         if not ports:
-            return [types.TextContent(type="text", text="No active serial/USB ports found on host.")]
+            return types.CallToolResult(content=[types.TextContent(type="text", text="No active serial/USB ports found on host.")])
         res = [{"port": p.device, "description": p.description} for p in ports]
-        return [types.TextContent(type="text", text=json.dumps(res, indent=2))]
+        return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(res, indent=2))])
 
     connection_type = args.get("connection_type")
     endpoint = args.get("endpoint")
 
     if not connection_type or not endpoint:
-        return [types.TextContent(type="text", text=json.dumps({
-            "status": "error", 
-            "message": "Missing required parameters: 'connection_type' and 'endpoint'."
-        }))]
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=json.dumps({
+                "status": "error", 
+                "message": "Missing required parameters: 'connection_type' and 'endpoint'."
+            }))],
+            isError=True
+        )
 
     if name == "read_plc_state":
         start_address = args.get("start_address", 0)
         count = args.get("count", 10)
         client = get_modbus_client(connection_type, endpoint)
         if not client.connect():
-            return [types.TextContent(type="text", text=json.dumps({"status": "error", "message": "Failed to connect to PLC"}))]
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=json.dumps({"status": "error", "message": "Failed to connect to PLC"}))],
+                isError=True
+            )
         
         res = client.read_holding_registers(start_address, count)
         client.close()
         
         if res.isError():
-            return [types.TextContent(type="text", text=json.dumps({"status": "error", "message": "Modbus read failed"}))]
-        return [types.TextContent(type="text", text=json.dumps({"status": "success", "values": res.registers}))]
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=json.dumps({"status": "error", "message": "Modbus read failed"}))],
+                isError=True
+            )
+        return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps({"status": "success", "values": res.registers}))])
 
     elif name == "create_plc_backup":
         filepath = args.get("filepath", "twido_backup.json")
         client = get_modbus_client(connection_type, endpoint)
         if not client.connect():
-            return [types.TextContent(type="text", text="Failed to connect to PLC.")]
+            return types.CallToolResult(content=[types.TextContent(type="text", text="Failed to connect to PLC.")], isError=True)
         
         res = client.read_holding_registers(0, 100)
         client.close()
         if res.isError():
-            return [types.TextContent(type="text", text="Backup failed during memory read.")]
+            return types.CallToolResult(content=[types.TextContent(type="text", text="Backup failed during memory read.")], isError=True)
 
         backup_data = {
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -130,18 +139,18 @@ async def handle_call_tool(name: str, arguments: dict | None = None) -> list[typ
         }
         with open(filepath, "w") as f:
             json.dump(backup_data, f, indent=2)
-        return [types.TextContent(type="text", text=f"Backup successfully written to {filepath}")]
+        return types.CallToolResult(content=[types.TextContent(type="text", text=f"Backup successfully written to {filepath}")])
 
     elif name == "test_single_output_series":
         output_index = args.get("output_index")
         human_confirmed = args.get("human_confirmed", False)
         
         if not human_confirmed:
-            return [types.TextContent(type="text", text="Aborted: Human operator must confirm safety.")]
+            return types.CallToolResult(content=[types.TextContent(type="text", text="Aborted: Human operator must confirm safety.")], isError=True)
 
         client = get_modbus_client(connection_type, endpoint)
         if not client.connect():
-            return [types.TextContent(type="text", text="Connection failed.")]
+            return types.CallToolResult(content=[types.TextContent(type="text", text="Connection failed.")], isError=True)
 
         try:
             for i in range(16):
@@ -149,7 +158,7 @@ async def handle_call_tool(name: str, arguments: dict | None = None) -> list[typ
             client.write_coil(output_index, True)
             time.sleep(1.5)
             client.write_coil(output_index, False)
-            return [types.TextContent(type="text", text=f"Pulsed output %Q0.{output_index} for 1.5s and reset to LOW.")]
+            return types.CallToolResult(content=[types.TextContent(type="text", text=f"Pulsed output %Q0.{output_index} for 1.5s and reset to LOW.")])
         finally:
             client.close()
 
